@@ -7,7 +7,6 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR /app
 
-# system deps: lxml needs libxml/libxslt at runtime
 RUN apt-get update && apt-get install -y --no-install-recommends \
         libxml2 libxslt1.1 ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
@@ -18,8 +17,14 @@ RUN pip install -r /app/requirements.txt
 COPY docscrape_lib.py docscrape.py server.py /app/
 COPY static /app/static
 
-ENV DOCSCRAPE_DATA=/data/jobs
-RUN mkdir -p /data/jobs
+ENV DOCSCRAPE_DATA=/data/jobs \
+    DOCSCRAPE_CONTEXT=/context
+RUN mkdir -p /data/jobs /context
+
+LABEL org.opencontainers.image.title="web-shooter" \
+      org.opencontainers.image.description="Documentation crawler — turns any docs site into clean Markdown for AI context windows or RAG." \
+      org.opencontainers.image.source="https://github.com/KeeperOfStack/web-shooter" \
+      org.opencontainers.image.licenses="MIT"
 
 EXPOSE 8088
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \

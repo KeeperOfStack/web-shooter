@@ -1,13 +1,19 @@
-# Local build (for development on this repo).
-# To deploy from the prebuilt image instead, use docker-compose.ghcr.yml.
+# Pull the prebuilt image from GHCR — no repo clone needed.
+#
+# Usage:
+#   1. Pick a host folder for your AI context library, e.g. ~/context
+#   2. docker compose -f docker-compose.ghcr.yml up -d
+#   3. open http://localhost:8088/
+#
+# Override the context dir by exporting CONTEXT_DIR before `up`:
+#   CONTEXT_DIR=/srv/ai-context docker compose -f docker-compose.ghcr.yml up -d
 
 services:
   web-shooter:
-    build: .
-    image: web-shooter:latest
+    image: ghcr.io/keeperofstack/web-shooter:latest
     container_name: web-shooter
     restart: unless-stopped
-    user: "1000:1000"
+    pull_policy: always
     ports:
       - "8088:8088"
     volumes:

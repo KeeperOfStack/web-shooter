@@ -2,20 +2,23 @@
 docscrape HTTP service — FastAPI.
 
 Endpoints:
-  GET  /                          → static UI (static/index.html)
+  GET  /                          → static UI
   GET  /healthz                   → {"ok": true}
   POST /scrape                    → start a job, returns {job_id}
-       body: {"url": "...", "max": 200, "delay": 0.2, "mode": "single|split"}
+       body: {"url": "...", "max": 200, "delay": 0.2, "mode": "single|split",
+              "deliver_to_context": false, "overwrite": true}
   GET  /jobs                      → list jobs
   GET  /jobs/{job_id}             → job status + page count + progress
   GET  /jobs/{job_id}/download    → mode=single: .md  ;  mode=split: .zip
   GET  /jobs/{job_id}/files       → split mode: list relative paths
   GET  /jobs/{job_id}/files/{path:path}  → split mode: serve one file
   DELETE /jobs/{job_id}           → remove a job + artifacts
+  GET  /context                   → list context library entries
+  DELETE /context/{name}          → remove a context library entry
 
 Artifacts live under DOCSCRAPE_DATA (default ~/.local/share/docscrape/jobs).
-This service is stateless w.r.t. the host filesystem outside DATA_DIR — it
-does NOT write anywhere else. Safe to ship as a standalone container.
+"Context library" lives at DOCSCRAPE_CONTEXT (default ~/context). When
+deliver_to_context=true the finished artifact is copied straight in.
 """
 from __future__ import annotations
 import os, json, uuid, time, zipfile, threading, traceback, urllib.parse as up
@@ -23,7 +26,6 @@ from pathlib import Path
 from typing import Literal
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks
-from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, HttpUrl
@@ -34,25 +36,16 @@ DATA_DIR = Path(os.environ.get("DOCSCRAPE_DATA",
                                str(Path.home() / ".local/share/docscrape/jobs")))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-app = FastAPI(title="web-shooter", version="1.1")
+CONTEXT_DIR = Path(os.environ.get("DOCSCRAPE_CONTEXT",
+                                  str(Path.home() / "context")))
+CONTEXT_DIR.mkdir(parents=True, exist_ok=True)
 
-# CORS — public-friendly default so anyone running the container can hit the
-# API from a different origin (e.g. the GitHub Pages landing page if they
-# wire it to a local backend). Override DOCSCRAPE_CORS_ORIGINS to lock down.
-_origins = os.environ.get("DOCSCRAPE_CORS_ORIGINS", "*").split(",")
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=[o.strip() for o in _origins if o.strip()],
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
+app = FastAPI(title="web-shooter", version="1.2")
 
-# Serve the web UI from ./static
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
 if _STATIC_DIR.is_dir():
     app.mount("/static", StaticFiles(directory=str(_STATIC_DIR)), name="static")
 
-# in-memory job registry; status is also mirrored to disk so restarts survive
 _jobs: dict[str, dict] = {}
 _jobs_lock = threading.Lock()
 
@@ -84,16 +77,19 @@ def _load_existing_jobs():
 _load_existing_jobs()
 
 
-# ---------------------------------------------------------------- models
-
 class ScrapeRequest(BaseModel):
     url: HttpUrl
-    max: int = Field(200, ge=1, le=2000, description="Max pages to crawl")
-    delay: float = Field(0.2, ge=0.0, le=5.0, description="Seconds between requests")
+    max: int = Field(200, ge=1, le=2000)
+    delay: float = Field(0.2, ge=0.0, le=5.0)
     mode: Literal["single", "split"] = "single"
+    deliver_to_context: bool = Field(
+        False,
+        description=("Also copy the finished artifact into the context library "
+                     "(DOCSCRAPE_CONTEXT, default ~/context). "
+                     "Single mode → ~/context/<host>.md. "
+                     "Split mode → ~/context/<host>/ folder."))
+    overwrite: bool = Field(True)
 
-
-# ---------------------------------------------------------------- worker
 
 def _run_job(job_id: str, req: ScrapeRequest):
     jdir = _job_dir(job_id)
@@ -134,6 +130,27 @@ def _run_job(job_id: str, req: ScrapeRequest):
                         "zip": str(zp), "name": f"{host}.zip",
                         "size": zp.stat().st_size, "file_count": len(files)}
 
+        if req.deliver_to_context:
+            import shutil
+            if req.mode == "single":
+                dest = CONTEXT_DIR / f"{host}.md"
+                if dest.exists() and not req.overwrite:
+                    artifact["context_skipped"] = str(dest)
+                else:
+                    if dest.exists():
+                        dest.unlink()
+                    shutil.copy2(out, dest)
+                    artifact["context_path"] = str(dest)
+            else:
+                dest = CONTEXT_DIR / host
+                if dest.exists() and not req.overwrite:
+                    artifact["context_skipped"] = str(dest)
+                else:
+                    if dest.exists():
+                        shutil.rmtree(dest)
+                    shutil.copytree(split_dir, dest)
+                    artifact["context_path"] = str(dest)
+
         with _jobs_lock:
             j = _jobs[job_id]
             j["status"] = "complete"
@@ -152,8 +169,6 @@ def _run_job(job_id: str, req: ScrapeRequest):
         _save_status(job_id)
 
 
-# ---------------------------------------------------------------- routes
-
 @app.get("/", response_class=HTMLResponse)
 def index():
     idx = _STATIC_DIR / "index.html"
@@ -164,7 +179,42 @@ def index():
 
 @app.get("/healthz")
 def healthz():
-    return {"ok": True, "data_dir": str(DATA_DIR), "jobs": len(_jobs)}
+    return {"ok": True, "data_dir": str(DATA_DIR),
+            "context_dir": str(CONTEXT_DIR), "jobs": len(_jobs)}
+
+
+@app.get("/context")
+def context_list():
+    entries = []
+    for p in sorted(CONTEXT_DIR.iterdir()) if CONTEXT_DIR.exists() else []:
+        if p.is_file() and p.suffix == ".md":
+            entries.append({"name": p.name, "kind": "single",
+                            "size": p.stat().st_size,
+                            "mtime": p.stat().st_mtime})
+        elif p.is_dir():
+            file_count = sum(1 for _ in p.rglob("*.md"))
+            total = sum(f.stat().st_size for f in p.rglob("*") if f.is_file())
+            entries.append({"name": p.name, "kind": "split",
+                            "file_count": file_count, "size": total,
+                            "mtime": p.stat().st_mtime})
+    return {"context_dir": str(CONTEXT_DIR), "entries": entries}
+
+
+@app.delete("/context/{name}")
+def context_delete(name: str):
+    if "/" in name or name.startswith("."):
+        raise HTTPException(400, "invalid name")
+    target = (CONTEXT_DIR / name).resolve()
+    if not str(target).startswith(str(CONTEXT_DIR.resolve())):
+        raise HTTPException(400, "invalid path")
+    if not target.exists():
+        raise HTTPException(404, "not found")
+    import shutil
+    if target.is_dir():
+        shutil.rmtree(target)
+    else:
+        target.unlink()
+    return {"deleted": str(target)}
 
 
 @app.post("/scrape")
@@ -174,15 +224,10 @@ def scrape(req: ScrapeRequest, bg: BackgroundTasks):
     now = time.time()
     with _jobs_lock:
         _jobs[job_id] = {
-            "job_id": job_id,
-            "status": "running",
-            "url": str(req.url),
-            "mode": req.mode,
-            "max": req.max,
-            "delay": req.delay,
-            "started_at": now,
-            "pages_done": 0,
-            "current_url": None,
+            "job_id": job_id, "status": "running",
+            "url": str(req.url), "mode": req.mode,
+            "max": req.max, "delay": req.delay,
+            "started_at": now, "pages_done": 0, "current_url": None,
         }
     _save_status(job_id)
     bg.add_task(_run_job, job_id, req)
@@ -216,11 +261,9 @@ def download(job_id: str):
         raise HTTPException(409, f"job status is {j['status']}")
     art = j["artifact"]
     if art["kind"] == "file":
-        path = Path(art["path"])
-        media = "text/markdown"
+        path = Path(art["path"]); media = "text/markdown"
     else:
-        path = Path(art["zip"])
-        media = "application/zip"
+        path = Path(art["zip"]);  media = "application/zip"
     if not path.is_file():
         raise HTTPException(410, "artifact missing on disk")
     return FileResponse(path, filename=path.name, media_type=media)
@@ -236,10 +279,7 @@ def list_files(job_id: str):
     if art["kind"] != "folder":
         raise HTTPException(400, "this job is single-file mode; use /download")
     root = Path(art["path"])
-    rels = []
-    for p in sorted(root.rglob("*")):
-        if p.is_file():
-            rels.append(str(p.relative_to(root)))
+    rels = [str(p.relative_to(root)) for p in sorted(root.rglob("*")) if p.is_file()]
     return {"root": str(root), "files": rels}
 
 
