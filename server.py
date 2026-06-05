@@ -2,7 +2,7 @@
 docscrape HTTP service — FastAPI.
 
 Endpoints:
-  GET  /                          → health + tiny HTML help page
+  GET  /                          → static UI (static/index.html)
   GET  /healthz                   → {"ok": true}
   POST /scrape                    → start a job, returns {job_id}
        body: {"url": "...", "max": 200, "delay": 0.2, "mode": "single|split"}
@@ -14,14 +14,17 @@ Endpoints:
   DELETE /jobs/{job_id}           → remove a job + artifacts
 
 Artifacts live under DOCSCRAPE_DATA (default ~/.local/share/docscrape/jobs).
+This service is stateless w.r.t. the host filesystem outside DATA_DIR — it
+does NOT write anywhere else. Safe to ship as a standalone container.
 """
 from __future__ import annotations
 import os, json, uuid, time, zipfile, threading, traceback, urllib.parse as up
 from pathlib import Path
-from typing import Optional, Literal
+from typing import Literal
 
 from fastapi import FastAPI, HTTPException, BackgroundTasks
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, PlainTextResponse
+from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse, HTMLResponse, PlainTextResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field, HttpUrl
 
@@ -31,13 +34,18 @@ DATA_DIR = Path(os.environ.get("DOCSCRAPE_DATA",
                                str(Path.home() / ".local/share/docscrape/jobs")))
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-# AI-reference context library — finished scrapes can be deposited here
-# directly (single mode -> one .md file, split mode -> a folder per site).
-CONTEXT_DIR = Path(os.environ.get("DOCSCRAPE_CONTEXT",
-                                  str(Path.home() / "context")))
-CONTEXT_DIR.mkdir(parents=True, exist_ok=True)
+app = FastAPI(title="web-shooter", version="1.1")
 
-app = FastAPI(title="docscrape", version="1.0")
+# CORS — public-friendly default so anyone running the container can hit the
+# API from a different origin (e.g. the GitHub Pages landing page if they
+# wire it to a local backend). Override DOCSCRAPE_CORS_ORIGINS to lock down.
+_origins = os.environ.get("DOCSCRAPE_CORS_ORIGINS", "*").split(",")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[o.strip() for o in _origins if o.strip()],
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
 # Serve the web UI from ./static
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
@@ -83,17 +91,6 @@ class ScrapeRequest(BaseModel):
     max: int = Field(200, ge=1, le=2000, description="Max pages to crawl")
     delay: float = Field(0.2, ge=0.0, le=5.0, description="Seconds between requests")
     mode: Literal["single", "split"] = "single"
-    deliver_to_context: bool = Field(
-        False,
-        description=("Also copy the finished artifact straight into the context "
-                     "library (DOCSCRAPE_CONTEXT, default ~/context). "
-                     "Single mode → ~/context/<host>.md. "
-                     "Split mode → ~/context/<host>/ folder.")
-    )
-    overwrite: bool = Field(
-        True,
-        description="If a context entry for this site already exists, replace it."
-    )
 
 
 # ---------------------------------------------------------------- worker
@@ -107,7 +104,6 @@ def _run_job(job_id: str, req: ScrapeRequest):
             j = _jobs[job_id]
             j["pages_done"] = done
             j["current_url"] = url
-        # don't fsync every tick — write every 5 pages
         if done % 5 == 0:
             _save_status(job_id)
 
@@ -130,7 +126,6 @@ def _run_job(job_id: str, req: ScrapeRequest):
                 fp = split_dir / rel
                 fp.parent.mkdir(parents=True, exist_ok=True)
                 fp.write_text(content, encoding="utf-8")
-            # also build a .zip for one-click download
             zp = jdir / f"{host}.zip"
             with zipfile.ZipFile(zp, "w", zipfile.ZIP_DEFLATED) as zf:
                 for rel in files:
@@ -138,29 +133,6 @@ def _run_job(job_id: str, req: ScrapeRequest):
             artifact = {"kind": "folder", "path": str(split_dir),
                         "zip": str(zp), "name": f"{host}.zip",
                         "size": zp.stat().st_size, "file_count": len(files)}
-
-        # Optionally deliver straight into the context library so the user
-        # doesn't have to download + extract before AI tooling can read it.
-        if req.deliver_to_context:
-            import shutil
-            if req.mode == "single":
-                dest = CONTEXT_DIR / f"{host}.md"
-                if dest.exists() and not req.overwrite:
-                    artifact["context_skipped"] = str(dest)
-                else:
-                    if dest.exists():
-                        dest.unlink()
-                    shutil.copy2(out, dest)
-                    artifact["context_path"] = str(dest)
-            else:
-                dest = CONTEXT_DIR / host
-                if dest.exists() and not req.overwrite:
-                    artifact["context_skipped"] = str(dest)
-                else:
-                    if dest.exists():
-                        shutil.rmtree(dest)
-                    shutil.copytree(split_dir, dest)
-                    artifact["context_path"] = str(dest)
 
         with _jobs_lock:
             j = _jobs[job_id]
@@ -192,44 +164,7 @@ def index():
 
 @app.get("/healthz")
 def healthz():
-    return {"ok": True, "data_dir": str(DATA_DIR),
-            "context_dir": str(CONTEXT_DIR), "jobs": len(_jobs)}
-
-
-@app.get("/context")
-def context_list():
-    """List everything currently in the context library."""
-    entries = []
-    for p in sorted(CONTEXT_DIR.iterdir()) if CONTEXT_DIR.exists() else []:
-        if p.is_file() and p.suffix == ".md":
-            entries.append({"name": p.name, "kind": "single",
-                            "size": p.stat().st_size,
-                            "mtime": p.stat().st_mtime})
-        elif p.is_dir():
-            file_count = sum(1 for _ in p.rglob("*.md"))
-            total = sum(f.stat().st_size for f in p.rglob("*") if f.is_file())
-            entries.append({"name": p.name, "kind": "split",
-                            "file_count": file_count, "size": total,
-                            "mtime": p.stat().st_mtime})
-    return {"context_dir": str(CONTEXT_DIR), "entries": entries}
-
-
-@app.delete("/context/{name}")
-def context_delete(name: str):
-    """Remove a single entry from the context library (file or folder)."""
-    if "/" in name or name.startswith("."):
-        raise HTTPException(400, "invalid name")
-    target = (CONTEXT_DIR / name).resolve()
-    if not str(target).startswith(str(CONTEXT_DIR.resolve())):
-        raise HTTPException(400, "invalid path")
-    if not target.exists():
-        raise HTTPException(404, "not found")
-    import shutil
-    if target.is_dir():
-        shutil.rmtree(target)
-    else:
-        target.unlink()
-    return {"deleted": str(target)}
+    return {"ok": True, "data_dir": str(DATA_DIR), "jobs": len(_jobs)}
 
 
 @app.post("/scrape")
@@ -319,7 +254,6 @@ def get_file(job_id: str, path: str):
         raise HTTPException(400, "this job is single-file mode")
     root = Path(art["path"]).resolve()
     target = (root / path).resolve()
-    # path traversal guard
     if not str(target).startswith(str(root) + os.sep) and target != root:
         raise HTTPException(400, "invalid path")
     if not target.is_file():

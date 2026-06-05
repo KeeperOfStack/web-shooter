@@ -18,9 +18,8 @@ RUN pip install -r /app/requirements.txt
 COPY docscrape_lib.py docscrape.py server.py /app/
 COPY static /app/static
 
-ENV DOCSCRAPE_DATA=/data/jobs \
-    DOCSCRAPE_CONTEXT=/context
-RUN mkdir -p /data/jobs /context
+ENV DOCSCRAPE_DATA=/data/jobs
+RUN mkdir -p /data/jobs
 
 EXPOSE 8088
 HEALTHCHECK --interval=30s --timeout=5s --start-period=5s --retries=3 \

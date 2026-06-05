@@ -19,15 +19,12 @@
     <div class="tagline">documentation crawler &middot; spins any docs site into AI context</div>
   </div>
   <div class="spider" aria-hidden="true">
-    <!-- inline SVG spider so we don't need an image -->
     <svg viewBox="0 0 100 100" width="120" height="120">
       <g stroke="#1a1a1a" stroke-width="3" fill="#c8102e" stroke-linecap="round">
         <ellipse cx="50" cy="55" rx="18" ry="22"/>
         <circle cx="50" cy="32" r="11"/>
-        <!-- legs -->
         <path d="M34 45 L10 30 M34 55 L8 55 M34 65 L10 80
                  M66 45 L90 30 M66 55 L92 55 M66 65 L90 80" fill="none"/>
-        <!-- eyes -->
         <ellipse cx="46" cy="30" rx="3" ry="2.5" fill="#fff"/>
         <ellipse cx="54" cy="30" rx="3" ry="2.5" fill="#fff"/>
       </g>
@@ -54,55 +51,28 @@
           <span class="lbl">DELAY (sec)</span>
           <input id="delay" type="number" min="0" max="5" step="0.05" value="0.2">
         </label>
-        <label>
-          <span class="lbl">OVERWRITE EXISTING</span>
-          <select id="overwrite">
-            <option value="true" selected>yes — replace</option>
-            <option value="false">no — keep old</option>
-          </select>
-        </label>
       </div>
 
       <div class="big-label">PICK A WEB-SHOT</div>
       <div class="choice-grid">
 
         <label class="choice">
-          <input type="radio" name="choice" value="single-download" checked>
+          <input type="radio" name="choice" value="single" checked>
           <div class="choice-card">
             <div class="num">①</div>
             <div class="ctitle">SINGLE FILE</div>
-            <div class="csub">→ DOWNLOAD</div>
+            <div class="csub">→ DOWNLOAD .MD</div>
             <p>One <code>.md</code> with TOC. Best for a single AI context window.</p>
           </div>
         </label>
 
         <label class="choice">
-          <input type="radio" name="choice" value="single-context">
+          <input type="radio" name="choice" value="split">
           <div class="choice-card">
             <div class="num">②</div>
-            <div class="ctitle">SINGLE FILE</div>
-            <div class="csub">→ TO ~/context</div>
-            <p>Same as ①, but drops straight into the context library on the host.</p>
-          </div>
-        </label>
-
-        <label class="choice">
-          <input type="radio" name="choice" value="split-download">
-          <div class="choice-card">
-            <div class="num">③</div>
             <div class="ctitle">SPLIT FOLDER</div>
             <div class="csub">→ DOWNLOAD .ZIP</div>
             <p>One file per page + <code>index.md</code>. Best for RAG / per-topic lookup.</p>
-          </div>
-        </label>
-
-        <label class="choice">
-          <input type="radio" name="choice" value="split-context">
-          <div class="choice-card">
-            <div class="num">④</div>
-            <div class="ctitle">SPLIT FOLDER</div>
-            <div class="csub">→ TO ~/context</div>
-            <p>Same as ③, dropped into <code>~/context/&lt;host&gt;/</code> on the host.</p>
           </div>
         </label>
 
@@ -125,16 +95,11 @@
     <div id="result" class="result"></div>
   </section>
 
-  <section class="panel-card">
-    <div class="caption-box">CONTEXT LIBRARY</div>
-    <div id="context-list" class="ctx-list">loading…</div>
-  </section>
-
 </main>
 
 <footer class="footer">
-  <span>WEB-SHOOTER · built on docscrape · port 8088</span>
-  <span><a href="/docs">openapi /docs</a> · <a href="/healthz">/healthz</a></span>
+  <span>WEB-SHOOTER · port 8088</span>
+  <span><a href="/docs">openapi /docs</a> · <a href="/healthz">/healthz</a> · <a href="https://github.com/KeeperOfStack/web-shooter">github</a></span>
 </footer>
 
 <script src="/static/app.js"></script>

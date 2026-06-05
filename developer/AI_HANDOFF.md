@@ -37,8 +37,8 @@ mirroring, image archiving.
                                                    └────────┬────────┘
                                                             │ writes
                                                             ▼
-                                          DOCSCRAPE_DATA   +   DOCSCRAPE_CONTEXT
-                                          (jobs/<id>/...)      (~/context, optional)
+                                          DOCSCRAPE_DATA
+                                          (jobs/<id>/...)
 ```
 
 `docscrape_lib.py` is the only file that knows HTML. `server.py` is
@@ -86,9 +86,15 @@ page's URL path, plus an `index.md` table of contents.
   under `DATA_DIR/<job_id>/`.
 - Status is mirrored to `<job_id>/status.json` so a container restart
   re-loads the registry (see `_load_existing_jobs`).
-- `deliver_to_context: true` copies the finished artifact into
-  `CONTEXT_DIR` for downstream AI tools. Single mode → `<host>.md`.
-  Split mode → `<host>/` directory.
+- The service is stateless w.r.t. the host filesystem outside
+  `DATA_DIR`. No bind-mounts to `~/context` or anywhere else — that
+  coupling was removed in v1.1 so the project is safe to redistribute
+  as a generic public image. If you want a "deliver to a host dir"
+  feature back, add it as an opt-in flag (env var + request field)
+  and document the security implications.
+- CORS is wide-open by default (`DOCSCRAPE_CORS_ORIGINS=*`) so a
+  browser on a different origin can call the API. Tighten in any
+  production deployment.
 - Endpoints documented in the file's top docstring; keep it in sync if
   you add routes.
 - Static UI is mounted at `/static`; root `/` serves `static/index.html`.
@@ -128,9 +134,9 @@ page's URL path, plus an `index.md` table of contents.
 - **Headings get `¶` anchor links from Sphinx.** We strip them in
   `clean()`. If a site uses `#` or `🔗` instead, add to the set in
   `clean()`.
-- **`user: "1000:1000"`** in compose. Required so the bind-mounted
-  `/context` is writable by the host user. Will break on hosts with a
-  different UID — call it out in HUMAN_SETUP.
+- **No host bind-mounts in compose.** Intentional — see the
+  statelessness note above. Only the named volume `web-shooter-jobs`
+  is used. Do not re-add a `~/context` mount without a clear opt-in.
 - **In-memory job registry + disk mirror.** If you add concurrency
   features, hold `_jobs_lock` for any read-modify-write on `_jobs`.
 - **Port 8088, not 8080.** The compose file, Dockerfile EXPOSE, and
@@ -153,7 +159,8 @@ page's URL path, plus an `index.md` table of contents.
    `--split` / `--zip` / `--out`.
 4. Write `server.py` — FastAPI, `BackgroundTasks`-driven jobs, a disk
    mirror, `/scrape` `/jobs` `/jobs/{id}/download` `/jobs/{id}/files`
-   `/context` `/context/{name}` endpoints. Mount `/static`.
+   endpoints. Mount `/static`. Add `CORSMiddleware` reading
+   `DOCSCRAPE_CORS_ORIGINS`.
 5. Frontend in `static/` — three files, no build step. The aesthetic
    ("1967 Spider-Man cartoon") is a deliberate brand and uses inline
    SVG for the spider so we never depend on an external asset.
@@ -161,9 +168,8 @@ page's URL path, plus an `index.md` table of contents.
    ca-certificates curl`. Copy code, `pip install -r requirements.txt`,
    `EXPOSE 8088`, `HEALTHCHECK` against `/healthz`,
    `CMD uvicorn server:app --host 0.0.0.0 --port 8088`.
-7. Compose: bind-mount the context dir, named volume for jobs, run as
-   UID 1000. Image tag `web-shooter:latest`, container name
-   `web-shooter`.
+7. Compose: named volume for jobs (no host bind-mounts). Image tag
+   `web-shooter:latest`, container name `web-shooter`, port 8088.
 
 ---
 

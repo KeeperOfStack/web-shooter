@@ -12,7 +12,6 @@ const sPages   = $("s-pages");
 const sCur     = $("s-cur");
 const bar      = $("bar");
 const result   = $("result");
-const ctxList  = $("context-list");
 
 let poller = null;
 
@@ -23,46 +22,8 @@ function fmtBytes(n) {
   return (n/1024/1024).toFixed(2) + " MB";
 }
 
-function selectedChoice() {
-  const v = document.querySelector('input[name="choice"]:checked').value;
-  // value format: "<mode>-<sink>"
-  const [mode, sink] = v.split("-");
-  return { mode, sink };  // sink: "download" or "context"
-}
-
-async function refreshContext() {
-  try {
-    const r = await fetch("/context");
-    const data = await r.json();
-    if (!data.entries || data.entries.length === 0) {
-      ctxList.innerHTML = '<em>nothing in <code>'+data.context_dir+'</code> yet.</em>';
-      return;
-    }
-    ctxList.innerHTML = data.entries.map(e => {
-      const badge = e.kind === "split"
-        ? '<span class="badge">SPLIT</span>'
-        : '<span class="badge single">SINGLE</span>';
-      const meta = e.kind === "split"
-        ? `${e.file_count} files · ${fmtBytes(e.size)}`
-        : `${fmtBytes(e.size)}`;
-      return `<div class="ctx-row">
-        ${badge}
-        <span class="name">${e.name}</span>
-        <span class="size">${meta}</span>
-        <button data-name="${encodeURIComponent(e.name)}">remove</button>
-      </div>`;
-    }).join("");
-    ctxList.querySelectorAll("button[data-name]").forEach(btn => {
-      btn.addEventListener("click", async () => {
-        const name = decodeURIComponent(btn.dataset.name);
-        if (!confirm(`Remove "${name}" from the context library?`)) return;
-        await fetch("/context/" + encodeURIComponent(name), {method:"DELETE"});
-        refreshContext();
-      });
-    });
-  } catch (err) {
-    ctxList.innerHTML = '<em>could not load context list.</em>';
-  }
+function selectedMode() {
+  return document.querySelector('input[name="choice"]:checked').value;
 }
 
 function showResult(kind, html) {
@@ -70,7 +31,7 @@ function showResult(kind, html) {
   result.innerHTML = html;
 }
 
-async function pollJob(jobId, sink) {
+async function pollJob(jobId) {
   try {
     const r = await fetch("/jobs/" + jobId);
     if (!r.ok) throw new Error("status " + r.status);
@@ -89,25 +50,18 @@ async function pollJob(jobId, sink) {
       const lines = [];
       lines.push(`<strong>✓ DONE.</strong> ${j.pages_done} pages scraped.`);
       if (art.kind === "folder") {
-        lines.push(`Built <code>${art.file_count}</code> markdown files.`);
+        lines.push(`Built <code>${art.file_count}</code> markdown files (${fmtBytes(art.size)} zipped).`);
+      } else {
+        lines.push(`Markdown size: ${fmtBytes(art.size)}.`);
       }
-      if (sink === "context" && art.context_path) {
-        lines.push(`<div style="margin-top:.5rem">Delivered to context library:<br><code>${art.context_path}</code></div>`);
-      } else if (sink === "context" && art.context_skipped) {
-        lines.push(`<div style="margin-top:.5rem">⚠ context entry already existed and overwrite was off:<br><code>${art.context_skipped}</code></div>`);
-      }
-      if (sink === "download") {
-        lines.push(`<a class="dlbtn" href="/jobs/${jobId}/download">⬇ DOWNLOAD ${art.name || "result"}</a>`);
-      }
+      lines.push(`<a class="dlbtn" href="/jobs/${jobId}/download">⬇ DOWNLOAD ${art.name || "result"}</a>`);
       showResult("ok", lines.join(""));
-      refreshContext();
     } else if (j.status === "error") {
       clearInterval(poller); poller = null;
       goBtn.disabled = false;
       showResult("err", `<strong>✗ FAILED.</strong> ${j.error || "unknown error"}`);
     }
   } catch (err) {
-    // transient — keep polling
     console.warn("poll error", err);
   }
 }
@@ -117,20 +71,18 @@ form.addEventListener("submit", async (ev) => {
   if (poller) { clearInterval(poller); poller = null; }
   result.className = "result"; result.innerHTML = "";
 
-  const { mode, sink } = selectedChoice();
+  const mode = selectedMode();
   const body = {
-    url:                 $("url").value.trim(),
-    max:                 parseInt($("max").value, 10) || 200,
-    delay:               parseFloat($("delay").value) || 0.2,
-    mode:                mode,
-    deliver_to_context:  sink === "context",
-    overwrite:           $("overwrite").value === "true",
+    url:   $("url").value.trim(),
+    max:   parseInt($("max").value, 10) || 200,
+    delay: parseFloat($("delay").value) || 0.2,
+    mode:  mode,
   };
 
   goBtn.disabled = true;
   statusEl.classList.remove("hidden");
   sUrl.textContent  = body.url;
-  sMode.textContent = `${mode.toUpperCase()} → ${sink.toUpperCase()}`;
+  sMode.textContent = mode.toUpperCase();
   sPages.textContent = "0";
   sCur.textContent  = "…";
   bar.style.width = "0%";
@@ -155,8 +107,6 @@ form.addEventListener("submit", async (ev) => {
   }
   const j = await resp.json();
   sJob.textContent = j.job_id;
-  poller = setInterval(() => pollJob(j.job_id, sink), 1500);
-  pollJob(j.job_id, sink);
+  poller = setInterval(() => pollJob(j.job_id), 1500);
+  pollJob(j.job_id);
 });
-
-refreshContext();

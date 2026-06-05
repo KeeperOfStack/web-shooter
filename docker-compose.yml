@@ -4,17 +4,17 @@ services:
     image: web-shooter:latest
     container_name: web-shooter
     restart: unless-stopped
-    user: "1000:1000"
     ports:
       - "8088:8088"
     volumes:
-      # The host's context library — finished scrapes land here directly.
-      - /home/kratos/context:/context
       # Persistent job artifacts (downloads survive restarts).
       - web-shooter-jobs:/data/jobs
     environment:
-      - DOCSCRAPE_CONTEXT=/context
       - DOCSCRAPE_DATA=/data/jobs
+      # CORS: "*" by default so the public landing page on GitHub Pages can
+      # talk to a self-hosted backend. Tighten this to your own origin(s) if
+      # you're exposing the API to the internet.
+      - DOCSCRAPE_CORS_ORIGINS=*
 
 volumes:
   web-shooter-jobs:

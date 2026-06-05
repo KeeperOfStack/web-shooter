@@ -14,9 +14,11 @@ chunked retrieval / notebook-style LLMs).
 Two front doors:
 
 - **HTTP / web UI** — open a browser at the container port, paste a docs
-  root URL, pick "single" or "split", get a download or a drop straight
-  into your `~/context` library.
+  root URL, pick "single" or "split", click download.
 - **CLI** — `python docscrape.py <url> [--split] [--zip] -o out`
+
+The service is **stateless w.r.t. your host filesystem** — it only writes
+to its own job-artifacts volume. Nothing touches `~/` on the host.
 
 Stack: Python 3.12, FastAPI + Uvicorn, BeautifulSoup4 + lxml,
 markdownify, requests. Frontend is plain HTML/CSS/JS (no build step).
@@ -52,11 +54,9 @@ This:
 - builds the image as `web-shooter:latest`
 - starts the container `web-shooter`
 - publishes the API on **host port 8088** → container port 8088
-- bind-mounts `/home/kratos/context` → `/context` so finished scrapes
-  appear on the host
 - creates a named volume `web-shooter-jobs` for persistent job artifacts
 
-Edit `docker-compose.yml` if your context dir is not `/home/kratos/context`.
+No host bind-mounts. The container is fully self-contained.
 
 Verify:
 
@@ -91,10 +91,10 @@ python docscrape.py https://docs.example.com/ --split --zip -o example_docs
 
 Environment variables:
 
-| var                  | default                                | meaning                         |
-|----------------------|----------------------------------------|---------------------------------|
-| `DOCSCRAPE_DATA`     | `~/.local/share/docscrape/jobs`        | where job artifacts live        |
-| `DOCSCRAPE_CONTEXT`  | `~/context`                            | "deliver to context" target dir |
+| var                       | default                          | meaning                                              |
+|---------------------------|----------------------------------|------------------------------------------------------|
+| `DOCSCRAPE_DATA`          | `~/.local/share/docscrape/jobs`  | where job artifacts live                             |
+| `DOCSCRAPE_CORS_ORIGINS`  | `*`                              | comma-separated allowed CORS origins (tighten for prod) |
 
 ---
 
@@ -103,11 +103,9 @@ Environment variables:
 1. Paste a documentation root URL (e.g. `https://docs.python.org/3/`).
 2. Set **MAX PAGES** (default 200, hard cap 2000) and **DELAY** seconds
    between requests (default 0.2 — be polite).
-3. Pick one of four web-shots:
-   - **① SINGLE → DOWNLOAD** — get one `.md` file back
-   - **② SINGLE → CONTEXT** — drop one `.md` into `~/context`
-   - **③ SPLIT → DOWNLOAD** — get a `.zip` of a per-page folder
-   - **④ SPLIT → CONTEXT** — drop the folder into `~/context`
+3. Pick one of two web-shots:
+   - **① SINGLE → DOWNLOAD .MD** — get one `.md` file back
+   - **② SPLIT → DOWNLOAD .ZIP** — get a `.zip` of a per-page folder
 4. Click **GO**. Progress bar polls `/jobs/{id}` until done.
 
 ---
@@ -163,6 +161,5 @@ web-shooter/
 - **Garbage in output** — the site uses a layout `MAIN_SELECTORS` / 
   `STRIP_SELECTORS` doesn't know about. Add the right CSS selector to
   the lists at the top of `docscrape_lib.py`.
-- **"Permission denied" on `/context`** — make sure the host dir is
-  owned by UID 1000 (matches `user: "1000:1000"` in compose) or change
-  the user line.
+- **CORS errors when calling the API from a different origin** — set
+  `DOCSCRAPE_CORS_ORIGINS=https://your.site` in the compose env.
