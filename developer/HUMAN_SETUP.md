@@ -52,11 +52,10 @@ This:
 - builds the image as `web-shooter:latest`
 - starts the container `web-shooter`
 - publishes the API on **host port 8088** → container port 8088
-- bind-mounts `/home/kratos/context` → `/context` so finished scrapes
-  appear on the host
+- bind-mounts `~/context` (override with `CONTEXT_DIR=/your/path docker compose up -d`) → `/context` so finished scrapes appear on the host
 - creates a named volume `web-shooter-jobs` for persistent job artifacts
 
-Edit `docker-compose.yml` if your context dir is not `/home/kratos/context`.
+Adjust `docker-compose.yml` or set `CONTEXT_DIR` if you want the context library somewhere other than `~/context`.
 
 Verify:
 
