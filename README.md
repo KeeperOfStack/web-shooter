@@ -170,6 +170,19 @@ web-shooter/
 
 ---
 
+## ⚖️ Licensing & Commercial Use
+
+This project is **dual-licensed** to ensure the code remains open-source while protecting the project's development.
+
+### 1. Open Source Use (AGPLv3)
+By default, this repository is licensed under the **GNU Affero General Public License v3.0**. You are free to fork, modify, and use this software, provided that any derivative works or cloud services utilizing this code are also open-sourced under the same AGPLv3 terms.
+
+### 2. Commercial Licensing
+If you or your company wish to use this software in a proprietary, closed-source environment (or within a system where you cannot comply with the AGPLv3 open-source requirements), you must obtain a commercial exception license.
+
+To inquire about purchasing a commercial license, please **[open a new GitHub Issue here](../../issues/new?title=Commercial+License+Inquiry)** using the title "Commercial License Inquiry."
+
+
 ## 🛠️ Stack
 
 Python 3.12 · FastAPI · BeautifulSoup4 + lxml · markdownify · requests.
