@@ -172,8 +172,22 @@ def _safe_slug(url: str, root: str) -> str:
     path = path.strip("/")
     if not path:
         path = "index"
-    # drop file extensions like .html so we can add .md
+    # drop file extensions like .html/.php so we can add .md
     path = re.sub(r"\.(html?|php|aspx?)$", "", path, flags=re.I)
+    # For query-param-based wikis (e.g. MediaWiki ?title=Page_Name), the path
+    # alone (e.g. "index") is the same for every page.  Append the query params
+    # so each page gets a unique, meaningful slug.
+    qs = pu.query
+    if qs:
+        # Use the 'title' param if present, otherwise the full query string
+        qs_params = up.parse_qs(qs, keep_blank_values=False)
+        if "title" in qs_params:
+            qs_part = qs_params["title"][0]
+        else:
+            qs_part = qs
+        qs_slug = re.sub(r"[^A-Za-z0-9._-]+", "-", qs_part).strip("-")
+        if qs_slug and qs_slug.lower() != path.lower():
+            path = path + "/" + qs_slug
     # sanitize each segment
     parts = [re.sub(r"[^A-Za-z0-9._-]+", "-", p).strip("-") or "_" for p in path.split("/")]
     return "/".join(parts) + ".md"
