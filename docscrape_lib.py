@@ -7,7 +7,7 @@ render_single(root, pages) -> str   (one big markdown doc)
 render_split(root, pages) -> dict[str, str]   (filename -> content for a folder)
 """
 from __future__ import annotations
-import re, sys, time, urllib.parse as up
+import base64, re, sys, time, urllib.parse as up
 from collections import deque
 from dataclasses import dataclass
 
@@ -35,6 +35,13 @@ STRIP_SELECTORS = [
 
 SKIP_EXT = {".png",".jpg",".jpeg",".gif",".svg",".ico",".pdf",".zip",".gz",".tar",
             ".mp4",".webm",".mp3",".woff",".woff2",".ttf",".css",".js"}
+
+# MediaWiki query params that lead to login-walled junk (edit/history/etc.)
+SKIP_ACTIONS = {"edit", "history", "raw", "submit", "preview"}
+
+IMAGE_EXTS = {".png", ".jpg", ".jpeg", ".gif", ".webp"}
+IMAGE_MIME = {".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg",
+              ".gif": "image/gif", ".webp": "image/webp"}
 
 
 @dataclass
@@ -108,11 +115,39 @@ def links_from(soup, base):
         if not href or href.startswith(("mailto:", "javascript:", "#")):
             continue
         absu = up.urljoin(base, href)
-        path = up.urlparse(absu).path.lower()
+        parsed = up.urlparse(absu)
+        path = parsed.path.lower()
         if any(path.endswith(ext) for ext in SKIP_EXT):
+            continue
+        # Skip MediaWiki action URLs (edit, history, etc.) — they're login-walled junk
+        qs_params = up.parse_qs(parsed.query, keep_blank_values=False)
+        action = qs_params.get("action", [""])[0].lower()
+        if action in SKIP_ACTIONS:
             continue
         out.append(norm(absu))
     return out
+
+
+def fetch_image_as_data_uri(url: str, base_url: str) -> str | None:
+    """Fetch an image and return a data URI string, or None on failure."""
+    try:
+        abs_url = up.urljoin(base_url, url)
+        ext = up.urlparse(abs_url).path.lower()
+        ext = re.search(r'\.[a-z0-9]+$', ext)
+        if not ext:
+            return None
+        ext = ext.group(0)
+        if ext not in IMAGE_EXTS:
+            return None
+        r = requests.get(abs_url, headers={"User-Agent": UA}, timeout=TIMEOUT)
+        if r.status_code != 200:
+            return None
+        mime = IMAGE_MIME.get(ext, r.headers.get("content-type", "image/png").split(";")[0])
+        b64 = base64.b64encode(r.content).decode("ascii")
+        return f"data:{mime};base64,{b64}"
+    except Exception as e:
+        print(f"  ! image fetch failed ({url}): {e}", file=sys.stderr)
+        return None
 
 
 def crawl(root: str, max_pages: int = 200, delay: float = 0.2,
@@ -146,6 +181,17 @@ def crawl(root: str, max_pages: int = 200, delay: float = 0.2,
         if not main:
             continue
         clean(main)
+        # Embed images as base64 data URIs so the markdown is self-contained
+        for img in main.find_all("img"):
+            src = img.get("src", "")
+            if src and not src.startswith("data:"):
+                data_uri = fetch_image_as_data_uri(src, final_url)
+                if data_uri:
+                    img["src"] = data_uri
+                else:
+                    # If we can't fetch it, remove the img tag so markdownify
+                    # doesn't emit a broken relative path reference
+                    img.decompose()
         title = page_title(soup, url)
         body = md(str(main), heading_style="ATX", strip=["script","style"]).strip()
         body = re.sub(r"\n{3,}", "\n\n", body)
