@@ -79,7 +79,7 @@ _load_existing_jobs()
 
 class ScrapeRequest(BaseModel):
     url: HttpUrl
-    max: int = Field(200, ge=1, le=2000)
+    max: int = Field(200, ge=1, le=10000)
     delay: float = Field(0.2, ge=0.0, le=5.0)
     mode: Literal["single", "split"] = "single"
     deliver_to_context: bool = Field(
