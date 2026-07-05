@@ -18,7 +18,7 @@ services:
       - "8088:8088"
     volumes:
       # Host context library — finished "deliver to ~/context" jobs land here.
-      - ${CONTEXT_DIR:-~/context}:/context
+      - /media/chasm/projects/web-shooter/web-shooter-output:/context
       # Persistent job artifacts (downloads survive restarts).
       - web-shooter-jobs:/data/jobs
     environment:
