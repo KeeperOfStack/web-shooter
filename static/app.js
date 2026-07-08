@@ -13,14 +13,77 @@ const sCur     = $("s-cur");
 const bar      = $("bar");
 const result   = $("result");
 const ctxList  = $("context-list");
+const queueList = $("queue-list");
 
 let poller = null;
+let queuePoller = null;
 
 function fmtBytes(n) {
   if (n == null) return "—";
   if (n < 1024) return n + " B";
   if (n < 1024*1024) return (n/1024).toFixed(1) + " KB";
   return (n/1024/1024).toFixed(2) + " MB";
+}
+
+function fmtAge(ts) {
+  if (!ts) return "";
+  const s = Math.round(Date.now()/1000 - ts);
+  if (s < 60) return s + "s ago";
+  if (s < 3600) return Math.round(s/60) + "m ago";
+  return Math.round(s/3600) + "h ago";
+}
+
+async function refreshQueue() {
+  try {
+    const r = await fetch("/jobs");
+    const jobs = await r.json();
+    if (!jobs.length) {
+      queueList.innerHTML = '<span class="queue-empty">no jobs yet — fire a web-shot above!</span>';
+      return;
+    }
+    queueList.innerHTML = jobs.map(j => {
+      const statusCls = j.status === "complete" ? "complete" : j.status === "error" ? "error" : "running";
+      const statusLabel = j.status.toUpperCase();
+      const maxP = j.max || 200;
+      const pct = j.status === "complete" ? 100 : Math.min(99, Math.round((j.pages_done||0)/maxP*100));
+      const age = fmtAge(j.started_at);
+      const art = j.artifact || {};
+
+      let info = `${j.mode} · ${j.pages_done||0} pages`;
+      if (j.status === "running" && j.current_url) info += ` · <em style="font-weight:400">${j.current_url.slice(0,60)}</em>`;
+      if (j.status === "complete") info += ` · ${fmtBytes(art.size)} · ${age}`;
+      if (j.status === "error") info += ` · ${j.error || "unknown error"}`;
+
+      const bar = j.status === "running"
+        ? `<div class="queue-bar-wrap"><div class="queue-bar" style="width:${pct}%"></div></div>`
+        : "";
+
+      let actions = "";
+      if (j.status === "complete") {
+        actions += `<a href="/jobs/${j.job_id}/download" title="Download">⬇ DL</a>`;
+      }
+      actions += `<button data-jid="${j.job_id}" class="del-job" title="Remove">✕</button>`;
+
+      return `<div class="queue-row">
+        <span class="qbadge ${statusCls}">${statusLabel}</span>
+        <div class="qmeta">
+          <div class="qurl">${j.url}</div>
+          <div class="qinfo">${info}${bar}</div>
+        </div>
+        <div class="qactions">${actions}</div>
+      </div>`;
+    }).join("");
+
+    queueList.querySelectorAll("button.del-job").forEach(btn => {
+      btn.addEventListener("click", async () => {
+        await fetch("/jobs/" + btn.dataset.jid, { method: "DELETE" });
+        refreshQueue();
+        refreshContext();
+      });
+    });
+  } catch (err) {
+    queueList.innerHTML = '<span class="queue-empty">could not load queue.</span>';
+  }
 }
 
 function selectedChoice() {
@@ -84,6 +147,7 @@ async function pollJob(jobId, sink) {
       clearInterval(poller); poller = null;
       goBtn.disabled = false;
       bar.style.width = "100%";
+      refreshQueue();
       const art = j.artifact || {};
       const lines = [];
       lines.push(`<strong>✓ DONE.</strong> ${j.pages_done} pages scraped.`);
@@ -103,6 +167,7 @@ async function pollJob(jobId, sink) {
     } else if (j.status === "error") {
       clearInterval(poller); poller = null;
       goBtn.disabled = false;
+      refreshQueue();
       showResult("err", `<strong>✗ FAILED.</strong> ${j.error || "unknown error"}`);
     }
   } catch (err) {
@@ -159,3 +224,5 @@ form.addEventListener("submit", async (ev) => {
 });
 
 refreshContext();
+refreshQueue();
+queuePoller = setInterval(refreshQueue, 3000);
