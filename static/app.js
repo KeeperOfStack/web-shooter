@@ -123,6 +123,7 @@ form.addEventListener("submit", async (ev) => {
     mode:                mode,
     deliver_to_context:  sink === "context",
     overwrite:           $("overwrite").value === "true",
+    embed_images:        $("embed-images").value === "true",
   };
 
   goBtn.disabled = true;

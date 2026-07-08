@@ -151,8 +151,10 @@ def fetch_image_as_data_uri(url: str, base_url: str) -> str | None:
 
 
 def crawl(root: str, max_pages: int = 200, delay: float = 0.2,
-          progress=None) -> list[Page]:
-    """progress: optional callable(done:int, total_target:int, url:str)."""
+          progress=None, embed_images: bool = False) -> list[Page]:
+    """progress: optional callable(done:int, total_target:int, url:str).
+    embed_images: if True, fetch each <img> and inline it as a base64 data URI
+    (self-contained but can make output very large). Default False."""
     root = norm(root)
     seen: set[str] = set()
     queue: deque[str] = deque([root])
@@ -181,17 +183,18 @@ def crawl(root: str, max_pages: int = 200, delay: float = 0.2,
         if not main:
             continue
         clean(main)
-        # Embed images as base64 data URIs so the markdown is self-contained
-        for img in main.find_all("img"):
-            src = img.get("src", "")
-            if src and not src.startswith("data:"):
-                data_uri = fetch_image_as_data_uri(src, final_url)
-                if data_uri:
-                    img["src"] = data_uri
-                else:
-                    # If we can't fetch it, remove the img tag so markdownify
-                    # doesn't emit a broken relative path reference
-                    img.decompose()
+        # Optionally embed images as base64 data URIs (opt-in, default off)
+        if embed_images:
+            for img in main.find_all("img"):
+                src = img.get("src", "")
+                if src and not src.startswith("data:"):
+                    data_uri = fetch_image_as_data_uri(src, final_url)
+                    if data_uri:
+                        img["src"] = data_uri
+                    else:
+                        # Can't fetch — remove so markdownify doesn't emit a
+                        # broken relative path reference
+                        img.decompose()
         title = page_title(soup, url)
         body = md(str(main), heading_style="ATX", strip=["script","style"]).strip()
         body = re.sub(r"\n{3,}", "\n\n", body)

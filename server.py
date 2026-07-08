@@ -6,7 +6,8 @@ Endpoints:
   GET  /healthz                   → {"ok": true}
   POST /scrape                    → start a job, returns {job_id}
        body: {"url": "...", "max": 200, "delay": 0.2, "mode": "single|split",
-              "deliver_to_context": false, "overwrite": true}
+              "deliver_to_context": false, "overwrite": true,
+              "embed_images": false}
   GET  /jobs                      → list jobs
   GET  /jobs/{job_id}             → job status + page count + progress
   GET  /jobs/{job_id}/download    → mode=single: .md  ;  mode=split: .zip
@@ -40,7 +41,7 @@ CONTEXT_DIR = Path(os.environ.get("DOCSCRAPE_CONTEXT",
                                   str(Path.home() / "context")))
 CONTEXT_DIR.mkdir(parents=True, exist_ok=True)
 
-app = FastAPI(title="web-shooter", version="1.2")
+app = FastAPI(title="web-shooter", version="1.3")
 
 _STATIC_DIR = Path(__file__).resolve().parent / "static"
 if _STATIC_DIR.is_dir():
@@ -89,6 +90,10 @@ class ScrapeRequest(BaseModel):
                      "Single mode → ~/context/<host>.md. "
                      "Split mode → ~/context/<host>/ folder."))
     overwrite: bool = Field(True)
+    embed_images: bool = Field(
+        False,
+        description=("Embed images as base64 data URIs in the output Markdown. "
+                     "Default off — keeps output lean. Enable for self-contained docs."))
 
 
 def _run_job(job_id: str, req: ScrapeRequest):
@@ -104,7 +109,8 @@ def _run_job(job_id: str, req: ScrapeRequest):
             _save_status(job_id)
 
     try:
-        pages = crawl(str(req.url), req.max, req.delay, progress=progress)
+        pages = crawl(str(req.url), req.max, req.delay, progress=progress,
+                      embed_images=req.embed_images)
         if not pages:
             raise RuntimeError("No pages scraped (site empty or unreachable)")
 
@@ -227,6 +233,7 @@ def scrape(req: ScrapeRequest, bg: BackgroundTasks):
             "job_id": job_id, "status": "running",
             "url": str(req.url), "mode": req.mode,
             "max": req.max, "delay": req.delay,
+            "embed_images": req.embed_images,
             "started_at": now, "pages_done": 0, "current_url": None,
         }
     _save_status(job_id)

@@ -21,9 +21,12 @@ def main():
                     help="With --split, also produce a .zip of the folder")
     ap.add_argument("--max", type=int, default=500)
     ap.add_argument("--delay", type=float, default=0.3)
+    ap.add_argument("--embed-images", action="store_true", default=False,
+                    help="Embed images as base64 data URIs (default: off)")
     args = ap.parse_args()
 
-    pages = crawl(args.root, args.max, args.delay, progress=progress)
+    pages = crawl(args.root, args.max, args.delay, progress=progress,
+                  embed_images=args.embed_images)
     if not pages:
         print("No pages scraped.", file=sys.stderr)
         sys.exit(1)

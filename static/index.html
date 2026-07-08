@@ -51,10 +51,17 @@
           <input id="delay" type="number" min="0" max="5" step="0.05" value="0.2">
         </label>
         <label>
-          <span class="lbl">OVERWRITE EXISTING</span>
-          <select id="overwrite">
-            <option value="true" selected>yes — replace</option>
-            <option value="false">no — keep old</option>
+         <span class="lbl">OVERWRITE EXISTING</span>
+         <select id="overwrite">
+           <option value="true" selected>yes — replace</option>
+           <option value="false">no — keep old</option>
+         </select>
+       </label>
+        <label>
+          <span class="lbl">EMBED IMAGES</span>
+          <select id="embed-images">
+            <option value="false" selected>no — text only (faster)</option>
+            <option value="true">yes — inline base64</option>
           </select>
         </label>
       </div>
